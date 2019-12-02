@@ -5,7 +5,7 @@ let key_size = 32
 
 let value_size = 13
 
-let index_size = 10_000_000
+let index_size = 10_000
 
 let hash_size = 30
 
@@ -52,7 +52,7 @@ let run input =
     match input with
     | `Write | `All ->
         let bindings, t1 = with_timer (fun () -> replaces rw [] index_size) in
-        Printf.fprintf oc " write %fs; \n" t1; 
+        Printf.fprintf oc "{ \"write\": \"%fs\", \n" t1; 
         bindings
     | _ -> replaces rw [] index_size
   in
@@ -61,7 +61,7 @@ let run input =
     match input with
     | `Find `RW | `All ->
         let (), t2 = with_timer (fun () -> finds rw 0 bindings) in
-        Printf.fprintf oc "read_write %fs; \n" t2
+        Printf.fprintf oc "\"read_write\": \"%fs\"} \n" t2
     | _ -> ()
   in
   let () =
@@ -70,7 +70,7 @@ let run input =
         let ro = Index.v ~readonly:true ~log_size index_name in
         let (), t3 = with_timer (fun () -> finds ro 0 bindings) in
         Index.close ro;
-        Printf.fprintf oc "read_only %fs; \n" t3
+        Printf.fprintf oc "\"read_only\": \"%fs\" }" t3
     | _ -> ()
   in
   Index.close rw

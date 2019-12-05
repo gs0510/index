@@ -44,33 +44,44 @@ let rec finds t count = function
       ignore (Index.find t k);
       finds t (count + 1) tl
 
-let run input =
+let print_json input file =
+  let oc = open_out file in
+  Yojson.Basic.pretty_to_channel oc (`Assoc input);
+  output_string oc "\n";
+  close_out oc
+
+let run input file_name =
   Fmt.epr "Adding %d bindings.\n%!" index_size;
   let rw = Index.v ~fresh:true ~log_size index_name in
-  let bindings =
+  let bindings, output_json =
     match input with
     | `Write | `All ->
         let bindings, t1 = with_timer (fun () -> replaces rw [] index_size) in
         Fmt.epr "\n%d bindings added in %fs.\n%!" index_size t1;
-        bindings
-    | _ -> replaces rw [] index_size
+        (bindings, [ ("write", `Float t1) ])
+    | _ -> (replaces rw [] index_size, [])
   in
   Fmt.epr "Finding %d bindings.\n%!" index_size;
-  let () =
+  let output_json =
     match input with
     | `Find `RW | `All ->
         let (), t2 = with_timer (fun () -> finds rw 0 bindings) in
-        Fmt.epr "\n%d bindings found in %fs (RW).\n%!" index_size t2
-    | _ -> ()
+        Fmt.epr "\n%d bindings found in %fs (RW).\n%!" index_size t2;
+        ("read_write", `Float t2) :: output_json
+    | _ -> output_json
   in
-  let () =
+  let output_json =
     match input with
     | `Find `RO | `All ->
         let ro = Index.v ~readonly:true ~log_size index_name in
         let (), t3 = with_timer (fun () -> finds ro 0 bindings) in
         Index.close ro;
-        Fmt.epr "\n%d bindings found in %fs (RO).\n%!" index_size t3
-    | _ -> ()
+        Fmt.epr "\n%d bindings found in %fs (RO).\n%!" index_size t3;
+        ("read_only", `Float t3) :: output_json
+    | _ -> output_json
+  in
+  let () =
+    match file_name with "" -> () | _ -> print_json output_json file_name
   in
   Index.close rw
 
@@ -90,8 +101,13 @@ let input =
   in
   Arg.(value & opt options `All & info [ "b"; "bench" ] ~doc)
 
+let json_output =
+  let doc = "Filename where json output should be written" in
+  Arg.(value & opt string "" & info [ "j"; "json" ] ~doc)
+
 let cmd =
   let doc = "Specify the benchmark you want to run." in
-  (Term.(const run $ input), Term.info "run" ~doc ~exits:Term.default_exits)
+  ( Term.(const run $ input $ json_output),
+    Term.info "run" ~doc ~exits:Term.default_exits )
 
 let () = Term.(exit @@ eval cmd)

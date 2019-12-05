@@ -17,7 +17,7 @@ let hash_size = 30
 
 let value_size = 13
 
-let nb_entries = 10_000_000
+let nb_entries = 10_000
 
 let log_size = 500_000
 
@@ -35,6 +35,8 @@ let entry_size = key_size + value_size
 
 let random = Array.make nb_entries ("", "")
 
+let json_output = ref []
+
 let populate () =
   let rec loop i =
     if i = nb_entries then ()
@@ -46,15 +48,31 @@ let populate () =
   in
   loop 0
 
-let print_results db f nb_entries =
+let print_results db f nb_entries operation =
   let _, time = with_timer f in
   let micros = time *. 1_000_000. in
   let sec_op = micros /. float_of_int nb_entries in
   let mb = float_of_int (entry_size * nb_entries / 1_000_000) /. time in
   let ops_sec = float_of_int nb_entries /. time in
+  json_output :=
+    ( operation,
+      `Assoc
+        [
+          ("microsec_per_op", `Float micros);
+          ("ops_per_sec", `Float sec_op);
+          ("mb_per_sec", `Float mb);
+          ("total_time", `Float ops_sec);
+        ] )
+    :: !json_output;
   Log.app (fun l ->
-      l "%s: %f micros/op; \t %f op/s; \t %f MB/s; \t total time = %fs." db
-        sec_op ops_sec mb time)
+      l "%s %s: %f micros/op; \t %f op/s; \t %f MB/s; \t total time = %fs." db
+        operation sec_op ops_sec mb time)
+
+let print_json file =
+  let oc = open_out file in
+  Yojson.Basic.pretty_to_channel oc (`Assoc !json_output);
+  output_string oc "\n";
+  close_out oc
 
 let rec random_new_key ar =
   let k = Context.Key.v () in
@@ -115,7 +133,7 @@ module Index = struct
   let write_random () =
     Index_unix.reset_stats ();
     let rw = Index.v ~fresh:true ~log_size (root // "fill_random") in
-    print_results (write rw) nb_entries;
+    print_results (write rw) nb_entries "random_writes";
     write_amplif ();
     rw
 
@@ -123,7 +141,7 @@ module Index = struct
     Index_unix.reset_stats ();
     let rw = Index.v ~fresh:true ~log_size (root // "fill_seq") in
     Array.sort (fun a b -> String.compare (fst a) (fst b)) random;
-    print_results (write rw) nb_entries;
+    print_results (write rw) nb_entries "sequential_writes";
     write_amplif ();
     Index.close rw
 
@@ -132,7 +150,7 @@ module Index = struct
     let rw = Index.v ~fresh:true ~log_size (root // "fill_seq_hash") in
     let hash e = Context.Key.hash (fst e) in
     Array.sort (fun a b -> compare (hash a) (hash b)) random;
-    print_results (write rw) nb_entries;
+    print_results (write rw) nb_entries "sequential_hash_writes";
     write_amplif ();
     Index.close rw
 
@@ -144,7 +162,7 @@ module Index = struct
     let write rw =
       Array.fold_right (fun (k, v) () -> Index.replace rw k v) random
     in
-    print_results (write rw) nb_entries;
+    print_results (write rw) nb_entries "reverse_seq_hash_writes";
     write_amplif ();
     Index.close rw
 
@@ -158,18 +176,18 @@ module Index = struct
           Index.flush rw)
         random
     in
-    print_results (write rw) nb_entries;
+    print_results (write rw) nb_entries "write_and_sync";
     write_amplif ();
     Index.close rw
 
   let overwrite rw =
     Index_unix.reset_stats ();
-    print_results (write rw) nb_entries;
+    print_results (write rw) nb_entries "overwrite";
     write_amplif ()
 
   let read_random r =
     Index_unix.reset_stats ();
-    print_results (read r) nb_entries;
+    print_results (read r) nb_entries "read";
     read_amplif nb_entries
 
   let ro_read_random rw =
@@ -178,13 +196,13 @@ module Index = struct
     let ro =
       Index.v ~fresh:false ~readonly:true ~log_size (root // "fill_random")
     in
-    print_results (read ro) nb_entries;
+    print_results (read ro) nb_entries "read_only";
     read_amplif nb_entries
 
   let read_seq r =
     Index_unix.reset_stats ();
     let read () = Index.iter (fun _ _ -> ()) r in
-    print_results read nb_entries;
+    print_results read nb_entries "sequential_read";
     read_amplif nb_entries
 
   let read_absent r =
@@ -195,7 +213,7 @@ module Index = struct
         absents
     in
     Index_unix.reset_stats ();
-    print_results (read r) 1000;
+    print_results (read r) 1000 "read_absent";
     read_amplif 1000
 
   let close rw = Index.close rw
@@ -247,14 +265,14 @@ module Lmdb = struct
 
   let write_random () =
     get_wtxn root flags >>| fun (rw, env) ->
-    print_results (write rw) nb_entries;
+    print_results (write rw) nb_entries "write";
     print_stats rw;
     (rw, env)
 
   let write_seq () =
     Array.sort (fun a b -> String.compare (fst a) (fst b)) random;
     get_wtxn root flags >>| fun (rw, env) ->
-    print_results (write rw) nb_entries;
+    print_results (write rw) nb_entries "sequential_writes";
     closedir env
 
   let write_sync () =
@@ -266,12 +284,12 @@ module Lmdb = struct
               Lmdb.put_string txn ddb k v >>= fun () -> sync env))
         ls
     in
-    print_results (write rw env random) nb_entries;
+    print_results (write rw env random) nb_entries "write_and_sync";
     closedir env
 
-  let overwrite rw = print_results (write rw) nb_entries
+  let overwrite rw = print_results (write rw) nb_entries "overwrite"
 
-  let read_random r = print_results (read r) nb_entries
+  let read_random r = print_results (read r) nb_entries "read"
 
   (*use a new db, created without the flag Lmdb.NoRdAhead*)
   let read_seq () =
@@ -293,7 +311,7 @@ module Lmdb = struct
       >>| fun () -> cursor_close cursor
     in
     let aux_read r () = fail_on_error (read r) in
-    print_results (aux_read rw) nb_entries;
+    print_results (aux_read rw) nb_entries "sequential_read";
     closedir env
 
   let close env = closedir env
@@ -325,7 +343,7 @@ let init () =
   Log.app (fun l -> l "Log size: %d." log_size);
   populate ()
 
-let run input =
+let run input json_file =
   init ();
   Log.app (fun l -> l "\n");
   Log.app (fun l -> l "Fill in random order");
@@ -373,6 +391,7 @@ let run input =
       (fun (bench, triggers, message) -> match_input ~bench ~triggers ~message)
       bench_list
   in
+  let () = match json_file with "" -> () | _ -> print_json json_file in
   Index.close rw
 
 open Cmdliner
@@ -404,8 +423,13 @@ let input =
   in
   Arg.(value & opt options `Minimal & info [ "b"; "bench" ] ~doc)
 
+let json_output =
+  let doc = "Filename where json output should be written" in
+  Arg.(value & opt string "" & info [ "j"; "json" ] ~doc)
+
 let cmd =
   let doc = "Specify the benchmark you want to run." in
-  (Term.(const run $ input), Term.info "run" ~doc ~exits:Term.default_exits)
+  ( Term.(const run $ input $ json_output),
+    Term.info "run" ~doc ~exits:Term.default_exits )
 
 let () = Term.(exit @@ eval cmd)

@@ -1,13 +1,13 @@
 (executable
  (name main)
  (modules main)
- (libraries fmt index.unix common cmdliner))
+ (libraries fmt index.unix common cmdliner yojson))
 
 (executable
  (name db_bench)
  (modules db_bench)
  (libraries fmt index.unix lmdb common bigstring rresult logs logs.fmt
-   cmdliner))
+   cmdliner yojson))
 
 (alias
  (name bench)

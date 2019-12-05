@@ -5,7 +5,7 @@ let key_size = 32
 
 let value_size = 13
 
-let index_size = 10_000_000
+let index_size = 10_000
 
 let hash_size = 30
 

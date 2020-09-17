@@ -2,6 +2,7 @@ let check_none msg = Alcotest.(check (option reject)) msg None
 
 let check_some msg x = Alcotest.(check (option int)) msg (Some x)
 
+
 let test_noop () =
   let open Index.Cache.Noop in
   (* Test that added entries are never found. *)

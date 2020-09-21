@@ -30,6 +30,7 @@ let equal t t' =
 
 let log2 a = log a /. log 2.
 
+
 let v ~hash_size ~entry_size n =
   let entry_sizef = float_of_int entry_size in
   let entries_per_page = 4096. /. entry_sizef in
